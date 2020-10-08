@@ -1,23 +1,20 @@
-export enum Instructions {
-    INC = '+',
-    DEC = '-',
-    INC_P = '>',
-    DEC_P = '<',
-    TO_SX = '}',
-    FROM_SX = '{',
-    TO_TX = ')',
-    FROM_TX = '(',
-    TO_AX = '\'',
-    FROM_AX = '^',
-    LOOP_START = '[',
-    LOOP_END = ']',
-    MEASURE = ',',
-    HEAT = '$',
-    TRANSFER = '@',
-    ISOLATE = '#',
-    PRINT = '.',
-    COMPILE = '~'
-}
+import { Resevoir } from './resevoir';
+import { Transferable } from './transferable';
+import {
+    ResevoirModule,
+    RegisterModule, Registers,
+    PrintBufferModule,
+    MetaOperationsModule,
+    InstructionMemoryModule,
+    OutputModule, Output
+} from './modules';
+import {
+    MetaOp,
+    isPrintMetaOp,
+    isRelabelMetaOp
+} from './metaop';
+import { Memory } from './memory';
+import { Instruction } from './instruction';
 
 export enum VMErrors {
     SHUTDOWN = 'The VM is shutdown',
@@ -27,127 +24,111 @@ export enum VMErrors {
     MISSING_LOOP_END = 'Loop end is missing while jumping',
     BAD_RESEVOIR = 'Resevoir index given does not exist',
     BAD_TEMPERATURE = 'Temperature must be between 0 and 9000 K',
-    BAD_REAGENT = 'Given reagent index at given resevoir index does not exist'
-}
-
-export enum Outputs {
-    PILL = 10,
-    VIAL = 11,
-    EJECTION_PORT = 12
-}
-
-export interface Registers {
-    sx: number;
-    tx: number;
-    ax: number;
-}
-
-export interface Resevoir {
-    label: string;
-    reagents: number[];
-    temperature: number;
+    BAD_REAGENT = 'Given reagent index at given resevoir index does not exist',
+    BAD_TARGET = 'Given target index does not exist'
 }
 
 export class World {
-    private memory: number[];
-    private registers: Registers;
-    private pointer: number;
-    private instructionPointer: number;
-    private instructionMemory: string[];
-    private printBuffer: string;
+    private data: Memory<number>;
+    private instructions: InstructionMemoryModule;
+    private resevoirs: ResevoirModule;
+    private outputs: OutputModule;
+    private registers: RegisterModule;
+    private printBuffer: PrintBufferModule;
+    private metaOps: MetaOperationsModule;
     private shutdown: boolean;
     private error: boolean;
     
-    constructor(private readonly resevoirs: Resevoir[] = [], program?: string) {
-        Object.values(Outputs).forEach((index: number) => {
-            resevoirs[index] = { label: 'output', reagents: [], temperature: 293 }
-        });
+    constructor(resevoirs: Resevoir[] = [], program?: string) {
+        this.data = new Memory<number>(1024, 0);
+        this.instructions = new InstructionMemoryModule();
+        this.resevoirs = new ResevoirModule(resevoirs);
+        this.registers = new RegisterModule();
+        this.outputs = new OutputModule();
+        this.printBuffer = new PrintBufferModule();        
+        this.metaOps = new MetaOperationsModule();
+        this.outputs.onPrint((str: string) => this.printBuffer.print(str));
+
+        this.reset();
 
         if(program) {
-            this.loadProgram(program);
-        } else {
-            this.reset();
+            this.instructions.loadProgram(program);
         }
     }
 
     nextState(): void {
         if (this.shutdown) {
-            throw VMErrors.SHUTDOWN;
+            this.throwError(VMErrors.SHUTDOWN);
         } else if (this.error) {
-            throw VMErrors.ERROR;
+            this.throwError(VMErrors.ERROR);
         }
+
         try {
-            this.decode(this.getI());
+            this.decode(this.instructions.get());
         } catch (err) {
             this.error = true;
+            console.log(err);
         }
-        this.incI();
-    }
 
-    loadProgram(program: string): void {
-        this.instructionMemory = program.split('');
-        this.reset();
+        if (this.instructions.isFinished()) {
+            this.shutdown = true;
+        } else {
+            this.instructions.incrementPointer();
+        }
     }
 
     reset(): void {
-        this.memory = Array(1024).fill(0);
-        this.registers = { sx: 0, tx: 0, ax: 0 }
-        this.pointer = 0;
-        this.instructionPointer = 0;
+        this.data.reset();
+        this.instructions.reset();
+        this.registers.reset();
+        this.printBuffer.clear();
         this.shutdown = false;
         this.error = false;
-        this.printBuffer = '';
     }
 
     decode(instruction: string): void {
         switch(instruction) {
-            case Instructions.INC:
+            case Instruction.INC:
                 this.inc(); break;
-            case Instructions.DEC:
+            case Instruction.DEC:
                 this.dec(); break;
-            case Instructions.INC_P:
-                this.incP(); break;
-            case Instructions.DEC_P:
-                this.decP(); break;
-            case Instructions.TO_SX:
+            case Instruction.INC_P:
+                this.data.incrementPointer(); break;
+            case Instruction.DEC_P:
+                this.data.decrementPointer(); break;
+            case Instruction.TO_SX:
                 this.toSx(); break;
-            case Instructions.FROM_SX:
+            case Instruction.FROM_SX:
                 this.fromSx(); break;
-            case Instructions.TO_TX:
+            case Instruction.TO_TX:
                 this.toTx(); break;
-            case Instructions.FROM_TX:
+            case Instruction.FROM_TX:
                 this.fromTx(); break;
-            case Instructions.TO_AX:
+            case Instruction.TO_AX:
                 this.toAx(); break;
-            case Instructions.FROM_AX:
+            case Instruction.FROM_AX:
                 this.fromAx(); break;
-            case Instructions.LOOP_START:
+            case Instruction.LOOP_START:
                 this.loopStart(); break;
-            case Instructions.LOOP_END:
+            case Instruction.LOOP_END:
                 this.loopEnd(); break;
-            case Instructions.MEASURE:
+            case Instruction.MEASURE:
                 this.measure(); break;
-            case Instructions.HEAT:
+            case Instruction.HEAT:
                 this.heat(); break;
-            case Instructions.TRANSFER:
+            case Instruction.TRANSFER:
                 this.transfer(); break;
-            case Instructions.ISOLATE:
+            case Instruction.ISOLATE:
                 this.isolate(); break;
-            case Instructions.PRINT:
+            case Instruction.PRINT:
                 this.print(); break;
-            case Instructions.COMPILE:
+            case Instruction.COMPILE:
                 this.compile(); break;
+            case Instruction.META:
+                this.meta(); break;
             default:
-                throw VMErrors.BAD_INSTRUCTION;
+                this.throwError(VMErrors.BAD_INSTRUCTION);
         }
-    }
-    
-    getPointer(): number {
-        return this.pointer;
-    }
-
-    getInstructionPointer(): number {
-        return this.instructionPointer;
     }
 
     getShutdown(): boolean {
@@ -158,277 +139,174 @@ export class World {
         return this.error;
     }
     
-    getSx(): number {
-        return this.registers.sx;
-    }
-
-    setSx(value: number): number {
-        return this.registers.sx = value;
-    }
-    
-    getTx(): number {
-        return this.registers.tx;
-    }
-
-    setTx(value: number): number {
-        return this.registers.tx = value;
-    }
-
-    getAx(): number {
-        return this.registers.ax;
-    }
-
-    setAx(value: number): number {
-        return this.registers.ax = value;
-    }
-    
-    getResevoir(index: number): Resevoir {
-        if (!this.checkResevoir(index)) {
-            throw VMErrors.BAD_RESEVOIR;
-        }
-
-        return this.resevoirs[index];
-    }
-
     getPrintBuffer(): string {
-        if (this.printBuffer.length === 0) {
-            return this.printBuffer;
-        }
-        
-        return this.printBuffer.match(/.{1,80}/g).join('\n');
+        return this.printBuffer.getDisplayBuffer();
     }
     
-    getP(): number {
-        return this.memory[this.pointer];
+    getData(): number {
+        return this.data.get();
     }
 
-    setP(value: number): number {
-        return this.memory[this.pointer] = value;
+    getCurrentInstruction(): Instruction {
+        return this.instructions.get();
     }
 
-    // >
-    incP(): number {
-        if (this.pointer === this.memory.length - 1) {
-            this.pointer = 0;
-        } else {
-            this.pointer++;
-        }
-
-        return this.getP();
-    }
-
-    // <
-    decP(): number {
-        if (this.pointer === 0) {
-            this.pointer = this.memory.length - 1
-        } else {
-            this.pointer--;
-        }
-
-        return this.getP();
-    }
-
-    getI(): string {
-        return this.instructionMemory[this.instructionPointer];
+    queueMetaOp(metaOp: MetaOp): MetaOp {
+        return this.metaOps.queueMetaOp(metaOp);
     }
     
-    // next instruction
-    incI(): string | null {
-        if (this.instructionPointer === this.instructionMemory.length - 1) {
-            this.shutdown = true;
-            return null;
-        } else {
-            this.instructionPointer++;
-            return this.getI();
-        }
-    }
-
-    // prev instruction
-    decI(): string | null {
-        if (this.instructionPointer !== 0) {
-            this.instructionPointer--;
-        }
-
-        return this.getI();
-    }
-
     // +
     inc(): number {
-        return this.setP(this.getP() + 1);
+        return this.data.set(this.data.get() + 1);
     }
 
     // -
     dec(): number {
-        return this.setP(this.getP() - 1);
+        return this.data.set(this.data.get() - 1);
+    }
+
+    getRegisters(): Registers {
+        return this.registers.getRegisters();
     }
 
     // }
     toSx(): number {
-        return this.setSx(this.getP());
+        return this.registers.setSx(this.data.get());
     }
 
     // {
     fromSx(): number {
-        return this.setP(this.getSx());
+        return this.data.set(this.registers.getSx());
     }
 
     // )
     toTx(): number {
-        return this.setTx(this.getP());
+        return this.registers.setTx(this.data.get());
     }
 
     // (
     fromTx(): number {
-        return this.setP(this.getTx());
+        return this.data.set(this.registers.getTx());
     }
 
     // '
     toAx(): number {
-        return this.setAx(this.getP());
+        return this.registers.setAx(this.data.get());
     }
 
     // ^
     fromAx(): number {
-        return this.setP(this.getAx());
+        return this.data.set(this.registers.getAx());
     }
+
 
     // [
     loopStart(): void {
-        if (this.getP()) {
+        if (this.data.get()) {
             return;
         }
 
-        let nestCount = 0;
-        
-        while (this.getI() !== Instructions.LOOP_END && nestCount !== 0) {
-            if (this.getI() == Instructions.LOOP_START) {
-                nestCount++;
-            } else if (this.getI() === Instructions.LOOP_END) {
-                nestCount--;
-            } else if (this.instructionPointer === this.instructionMemory.length - 1) {
-                throw VMErrors.MISSING_LOOP_END;
-            }
-            
-            this.incI();
+        try {
+            this.instructions.seekLoopEnd();
+        } catch (err) {
+            this.throwError(VMErrors.MISSING_LOOP_END);
         }
     }
 
     // ]
     loopEnd(): void {
-        if(!this.getP()) {
+        if(!this.data.get()) {
             return;
         }
 
-        let nestCount = 0;
-        this.decI();
-        while (this.getI() !== Instructions.LOOP_START || nestCount !== 0) {
-            if (this.getI() == Instructions.LOOP_END) {
-                nestCount++;
-            } else if (this.getI() == Instructions.LOOP_START) {
-                nestCount--;
-            } else if (this.instructionPointer === 0) {
-                throw VMErrors.MISSING_LOOP_START;
-            }
-
-            this.decI();
+        this.instructions.decrementPointer();
+        try {
+            this.instructions.seekLoopStart();
+        } catch (err) {
+            this.throwError(VMErrors.MISSING_LOOP_START);
         }
     }
 
     // ,
     measure(): number {
-        return this.setAx(this.measureResevoir(this.getSx()));
+        return this.registers.setAx(this.resevoirs.measure(this.registers.getSx()));
     }
 
-    private measureResevoir(index: number): number {
-        return this.getResevoir(index)
-            .reagents
-            .reduce((carry: number, curr: number) => carry + curr);
-    }
-    
     // $
     heat(): number {
-        const targetTemp = ((273 - this.getTx()) + this.getAx());
-        return this.heatResevoir(this.getSx(), targetTemp);
+        const targetTemp = ((273 - this.registers.getTx()) + this.registers.getAx());
+        return this.resevoirs.heat(this.registers.getSx(), targetTemp);
     }
 
-    private heatResevoir(index: number, targetTemp: number): number {
-        if (targetTemp < 0 || targetTemp > 9000) {
-            throw VMErrors.BAD_TEMPERATURE;
-        }
-
-        return this.getResevoir(index).temperature = targetTemp;
-    }
-    
     // @
     transfer(): number {
-        return this.transferReagents(this.getSx(), this.getTx(), this.getAx());
-    }
-
-    private transferReagents(sourceIndex: number, targetIndex: number, amount: number): number {
-        const source = this.getResevoir(sourceIndex);
-        const target = this.getResevoir(targetIndex);
-        const sourceVolume = this.measureResevoir(sourceIndex);
-        let amountLeft = amount = amount > sourceVolume ? sourceVolume : amount;
-
-        for (let i = 0; i < source.reagents.length && amountLeft > 0; i++) {
-            if (source.reagents[i] > amountLeft) {
-                source.reagents[i] -= amountLeft;
-                target.reagents.push(amountLeft);
-                amountLeft = 0;
-            } else {
-                let removed = source.reagents.shift();
-                amountLeft -= removed;
-                target.reagents.push(removed);
-            }
-        }
-
-        return amount;
+        return this.resevoirs.transfer(
+            this.registers.getSx(),
+            this.getTarget(this.registers.getTx()),
+            this.registers.getAx()
+        );
     }
 
     // #
     isolate(): number {
-        return this.isolateReagents(this.getP(), this.getSx(), this.getTx(), this.getAx());
+        return this.resevoirs.isolate(
+            this.data.get(),
+            this.registers.getSx(),
+            this.getTarget(this.registers.getTx()),
+            this.registers.getAx()
+        );
     }
 
-    isolateReagents(reagentIndex: number, sourceIndex: number, targetIndex: number, amount: number): number {
-        if (!this.checkReagent(sourceIndex, reagentIndex)) {
-            throw VMErrors.BAD_REAGENT;
-        }
-
-        const sourceAmount = this.getResevoir(sourceIndex).reagents[reagentIndex];
-
-        if (amount >= sourceAmount) {
-            this.getResevoir(targetIndex).reagents.push(sourceAmount);
-            this.getResevoir(sourceIndex).reagents.splice(reagentIndex, 1);
-            return sourceAmount;
-        } else {
-            this.getResevoir(targetIndex).reagents.push(amount);
-            this.getResevoir(sourceIndex).reagents[reagentIndex] -= amount;
-            return amount;
-        }
-    }
-    
     // .
     print(): string {
-        return this.printBuffer = this.printBuffer.concat(String.fromCodePoint(this.getP()));
+        return this.printBuffer.printCodePoint(this.data.get());
     }
 
     // ~
     compile(): void {
         //no-op
     }
-    
-    checkResevoir(index: number): boolean {
-        return index > 0 && index <= this.resevoirs.length - 1;
+
+    // !
+    meta(): void {
+        const nestCount = this.instructions.getNestCount();
+        const metaOp: MetaOp = this.metaOps.dequeueMetaOp(nestCount);
+
+        this.decodeMetaOp(metaOp);
+
+        if (nestCount) {
+            this.metaOps.queueMetaOp(metaOp, nestCount);
+        }
     }
 
-    checkReagent(resevoirIndex: number, reagentIndex: number): boolean {
-        return this.checkResevoir(resevoirIndex)
-            && reagentIndex > 0
-            && reagentIndex <= this.resevoirs[resevoirIndex].reagents.length - 1;
+    decodeMetaOp(metaOp: MetaOp) {
+        if (isPrintMetaOp(metaOp)) {
+            this.printBuffer.print(metaOp.arguments.str);
+        } else if (isRelabelMetaOp(metaOp)) {
+            this.resevoirs.relabel(metaOp.arguments.resevoirIndex, metaOp.arguments.resevoir);
+        } else {
+            this.throwError(VMErrors.BAD_INSTRUCTION);
+        }
+    }
+
+    private throwError(error: VMErrors) {
+        this.error = true;
+        throw new Error(error);
     }
     
     checkTarget(index: number): boolean {
-        return this.checkResevoir(index) || Object.values(Outputs).includes(index);
+        return this.resevoirs.check(index) || Object.values(Output).includes(index);
+    }
+
+    getTarget(index: number): Transferable {
+        if (!this.checkTarget(index)) {
+            this.throwError(VMErrors.BAD_TARGET);
+        }
+
+        if (this.resevoirs.check(index)) {
+            return this.resevoirs.get(index);
+        } else {
+            return this.outputs.get(index);
+        }
     }
 }
