@@ -162,6 +162,9 @@ export class World {
 
     // -
     dec(): number {
+        if (!this.data.get()) {
+            return 0;
+        }
         return this.data.set(this.data.get() - 1);
     }
 

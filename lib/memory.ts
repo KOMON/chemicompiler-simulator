@@ -28,10 +28,18 @@ export class Memory<T> {
     }
     
     incrementPointer(): number {
+        if (this.pointer === this.size - 1) {
+            return this.pointer;
+        }
+        
         return ++this.pointer;
     }
 
     decrementPointer(): number {
+        if (!this.pointer) {
+            return this.pointer;
+        }
+        
         return --this.pointer;
     }
 
@@ -41,5 +49,9 @@ export class Memory<T> {
 
     set(value: T): T {
         return this.memory[this.pointer] = value;
+    }
+
+    getPointer(): number {
+        return this.pointer;
     }
 }

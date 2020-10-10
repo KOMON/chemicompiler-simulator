@@ -42,10 +42,13 @@ export class InstructionMemoryModule {
     }
 
     incrementPointer(): number {
-        const pointer = this.memory.incrementPointer();
         if (this.get() === Instruction.LOOP_START) {
             this.nestCount++;
-        } else if (this.get() === Instruction.LOOP_END && this.nestCount > 0) {
+        }
+
+        const pointer = this.memory.incrementPointer();
+
+        if (this.get() === Instruction.LOOP_END && this.nestCount > 0) {
             this.nestCount--;
         }
 
@@ -53,15 +56,13 @@ export class InstructionMemoryModule {
     }
 
     decrementPointer(): number {
-        const pointer = this.memory.decrementPointer();
-
         if (this.get() === Instruction.LOOP_END) {
             this.nestCount++;
         } else if (this.get() === Instruction.LOOP_START && this.nestCount > 0) {
             this.nestCount--;
         }
 
-        return pointer;
+        return this.memory.decrementPointer();
     }
 
     getNestCount(): number {
@@ -70,7 +71,7 @@ export class InstructionMemoryModule {
     
     seekLoopEnd(): void {
         const startingNestCount = this.getNestCount();
-        while(this.get() !== Instruction.LOOP_START && this.getNestCount() !== startingNestCount) {
+        while(this.get() !== Instruction.LOOP_END || this.getNestCount() !== startingNestCount) {
             if (this.isFinished()) {
                 throw new Error('No Loop End');
             }

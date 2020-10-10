@@ -22,8 +22,10 @@ export class MetaOperationsModule {
     }
 
     dequeueMetaOp(nestingLevel: number = 0): MetaOp | null {
-        if (!this.metaOps.has(nestingLevel)) {
-            return null;
+        if (!this.metaOps.has(nestingLevel) && nestingLevel) {
+            return this.dequeueMetaOp();
+        } else if (!this.metaOps.has(nestingLevel)) {
+            throw new Error('No such metaOp')
         }
 
         return this.metaOps.get(nestingLevel).shift();
