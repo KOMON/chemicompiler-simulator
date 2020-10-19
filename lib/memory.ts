@@ -1,22 +1,31 @@
 export class Memory<T> {
+
     private memory: T[];
     private pointer: number;
     
-    constructor(private size: number = 0, private defaultValue: T = null) {
+    constructor(private length: number = 0, private defaultValue: T = null) {
+        if (this.length < 0) {
+            this.length = 0;
+        }
+        
         this.reset();
     }
-
+    
     reset(): void {
-        this.memory = Array(this.size).fill(this.defaultValue);
+        this.setMemory(Array(this.length).fill(this.defaultValue));
+        this.rewind();
+    }
+
+    rewind(): void {
         this.pointer = 0;
     }
     
     getLength(): number {
-        return this.memory.length;
+        return this.length
     }
 
-    isFinished(): boolean {
-        return this.pointer === this.memory.length - 1;
+    isAtEnd(): boolean {
+        return this.pointer === this.length - 1
     }
 
     isAtStart(): boolean {
@@ -24,11 +33,12 @@ export class Memory<T> {
     }
     
     setMemory(arr: T[]) {
+        this.length = arr.length;
         this.memory = arr;
     }
     
     incrementPointer(): number {
-        if (this.pointer === this.size - 1) {
+        if (this.isAtEnd()) {
             return this.pointer;
         }
         
@@ -36,13 +46,13 @@ export class Memory<T> {
     }
 
     decrementPointer(): number {
-        if (!this.pointer) {
+        if (this.isAtStart()) {
             return this.pointer;
         }
         
         return --this.pointer;
     }
-
+    
     get(): T {
         return this.memory[this.pointer];
     }
